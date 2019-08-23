@@ -28,7 +28,6 @@ var EventTarget = require('./event/event-target');
 require('../audio/CCAudioEngine');
 const debug = require('./CCDebug');
 const renderer = require('./renderer/index.js');
-const inputManager = CC_QQPLAY ? require('./platform/BKInputManager') : require('./platform/CCInputManager');
 const dynamicAtlasManager = require('../core/renderer/utils/dynamic-atlas/manager');
 
 /**
@@ -138,9 +137,6 @@ var game = {
     _lastTime: null,
     _frameTime: null,
 
-    // Scenes list
-    _sceneInfos: [],
-
     /**
      * !#en The outer frame of the game canvas, parent of game container.
      * !#zh 游戏画布的外框，container 的父容器。
@@ -196,8 +192,6 @@ var game = {
      *      0 - Automatically chosen by engine<br/>
      *      1 - Forced to use canvas renderer<br/>
      *      2 - Forced to use WebGL renderer, but this will be ignored on mobile browsers<br/>
-     * 7. scenes<br/>
-     *      "scenes" include available scenes in the current bundle.<br/>
      *<br/>
      * Please DO NOT modify this object directly, it won't have any effect.<br/>
      * !#zh
@@ -224,8 +218,6 @@ var game = {
      *          0 - 通过引擎自动选择。                                                     <br/>
      *          1 - 强制使用 canvas 渲染。
      *          2 - 强制使用 WebGL 渲染，但是在部分 Android 浏览器中这个选项会被忽略。     <br/>
-     * 7. scenes                                                                         <br/>
-     *      “scenes” 当前包中可用场景。                                                   <br/>
      * <br/>
      * 注意：请不要直接修改这个对象，它不会有任何效果。
      * @property config
@@ -294,8 +286,6 @@ var game = {
         if (cc.audioEngine) {
             cc.audioEngine._break();
         }
-        // Pause animation
-        cc.director.stopAnimation();
         // Pause main loop
         if (this._intervalId)
             window.cancelAnimFrame(this._intervalId);
@@ -315,8 +305,7 @@ var game = {
         if (cc.audioEngine) {
             cc.audioEngine._restore();
         }
-        // Resume animation
-        cc.director.startAnimation();
+        cc.director._resetDeltaTime();
         // Resume main loop
         this._runMainLoop();
     },
@@ -354,7 +343,7 @@ var game = {
             cc.director.reset();
 
             game.pause();
-            cc.AssetLibrary._loadBuiltins(() => {
+            cc.assetManager.builtins.init(() => {
                 game.onStart();
                 game.emit(game.EVENT_RESTART);
             });
@@ -396,7 +385,7 @@ var game = {
 
         // Init engine
         this._initEngine();
-        cc.AssetLibrary._loadBuiltins(() => {
+        cc.assetManager.builtins.init(() => {
             // Log engine version
             console.log('Cocos Creator v' + cc.ENGINE_VERSION);
 
@@ -489,10 +478,14 @@ var game = {
         let jsList = this.config.jsList;
         if (jsList && jsList.length > 0) {
             var self = this;
-            cc.loader.load(jsList, function (err) {
-                if (err) throw new Error(JSON.stringify(err));
-                self._prepareFinished(cb);
-            });
+            var count = 0;
+            for (var i = 0, l = jsList.length; i < l; i++) {
+                cc.assetManager.loadScript(jsList[i], function (err) {
+                    if (err) throw new Error(JSON.stringify(err));
+                    count++;
+                    if (count === l) self._prepareFinished(cb);
+                });
+            }
         }
         else {
             this._prepareFinished(cb);
@@ -546,6 +539,7 @@ var game = {
             }
             this._persistRootNodes[id] = node;
             node._persistNode = true;
+            cc.assetManager.finalizer._addPersistNodeRef(node);
         }
     },
 
@@ -560,6 +554,7 @@ var game = {
         if (node === this._persistRootNodes[id]) {
             delete this._persistRootNodes[id];
             node._persistNode = false;
+            cc.assetManager.finalizer._removePersistNodeRef(node);
         }
     },
 
@@ -626,6 +621,9 @@ var game = {
     },
     //Run game.
     _runMainLoop: function () {
+        if (CC_EDITOR) {
+            return;
+        }
         var self = this, callback, config = self.config,
             director = cc.director,
             skip = true, frameRate = config.frameRate;
@@ -666,9 +664,6 @@ var game = {
             config.registerSystemEvent = true;
         }
         config.showFPS = !!config.showFPS;
-
-        // Scene parser
-        this._sceneInfos = config.scenes || [];
 
         // Collide Map and Group List
         this.collisionMatrix = config.collisionMatrix || [];
@@ -720,24 +715,11 @@ var game = {
             width, height,
             localCanvas, localContainer;
 
-        if (CC_WECHATGAME || CC_JSB || CC_RUNTIME) {
+        if (CC_JSB || CC_RUNTIME) {
             this.container = localContainer = document.createElement("DIV");
             this.frame = localContainer.parentNode === document.body ? document.documentElement : localContainer.parentNode;
-            if (cc.sys.browserType === cc.sys.BROWSER_TYPE_WECHAT_GAME_SUB) {
-                localCanvas = window.sharedCanvas || wx.getSharedCanvas();
-            }
-            else if (CC_JSB || CC_RUNTIME) {
-                localCanvas = window.__canvas;
-            }
-            else {
-                localCanvas = canvas;
-            }
+            localCanvas = window.__canvas;
             this.canvas = localCanvas;
-        }
-        else if (CC_QQPLAY) {
-            this.container = document.createElement("DIV");
-            this.frame = document.documentElement;
-            this.canvas = localCanvas = canvas;
         }
         else {
             var element = (el instanceof HTMLElement) ? el : (document.querySelector(el) || document.querySelector('#' + el));
@@ -790,9 +772,6 @@ var game = {
                 'antialias': cc.macro.ENABLE_WEBGL_ANTIALIAS,
                 'alpha': cc.macro.ENABLE_TRANSPARENT_CANVAS
             };
-            if (CC_QQPLAY) {
-                opts['preserveDrawingBuffer'] = true;
-            }
             renderer.initWebGL(localCanvas, opts);
             this._renderContext = renderer.device._gl;
             
@@ -820,7 +799,7 @@ var game = {
 
         // register system events
         if (this.config.registerSystemEvent)
-            inputManager.registerSystemEvent(this.canvas);
+            _cc.inputManager.registerSystemEvent(this.canvas);
 
         if (typeof document.hidden !== 'undefined') {
             hiddenPropName = "hidden";
@@ -874,11 +853,6 @@ var game = {
 
         if (navigator.userAgent.indexOf("MicroMessenger") > -1) {
             win.onfocus = onShown;
-        }
-
-        if (CC_WECHATGAME && cc.sys.browserType !== cc.sys.BROWSER_TYPE_WECHAT_GAME_SUB) {
-            wx.onShow && wx.onShow(onShown);
-            wx.onHide && wx.onHide(onHidden);
         }
 
         if ("onpageshow" in window && "onpagehide" in window) {

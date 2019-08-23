@@ -385,7 +385,7 @@ let RichText = cc.Class({
             }
             else {
                 let self = this;
-                cc.loader.load(this.font.nativeUrl, function (err, fontFamily) {
+                cc.assetManager.loadNativeFile(this.font, function (err, fontFamily) {
                     self._layoutDirty = true;
                     self._updateRichText();
                 });
@@ -906,7 +906,7 @@ let RichText = cc.Class({
             labelComponent.fontSize = this.fontSize;
         }
 
-        labelComponent._updateRenderData(true);
+        labelComponent._forceUpdateRenderData();
 
         if (textStyle && textStyle.event) {
             if (textStyle.event.click) {

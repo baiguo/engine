@@ -36,14 +36,17 @@ let _audioPool = [];
 
 let recycleAudio = function (audio) {
     audio._finishCallback = null;
-    if (_audioPool.length < 32) {
-        audio.off('ended');
-        audio.off('stop');
-        audio.src = null;
-        _audioPool.push(audio);
-    }
-    else {
-        audio.destroy();
+    audio.off('ended');
+    audio.off('stop');
+    audio.src = null;
+    // In case repeatly recycle audio
+    if (!_audioPool.includes(audio)) {
+        if (_audioPool.length < 32) {
+            _audioPool.push(audio);
+        }
+        else {
+            audio.destroy();
+        }
     }
 };
 
@@ -132,7 +135,7 @@ var audioEngine = {
      * @param {Number} volume - Volume size.
      * @return {Number} audioId
      * @example
-     * cc.loader.loadRes(url, cc.AudioClip, function (err, clip) {
+     * cc.assetManager.loadRes(url, cc.AudioClip, null, function (err, clip) {
      *     var audioID = cc.audioEngine.play(clip, false, 0.5);
      * });
      */
@@ -514,14 +517,14 @@ var audioEngine = {
      * @param {Function} [callback] - The callback of an audio.
      * @example
      * cc.audioEngine.preload(path);
-     * @deprecated `cc.audioEngine.preload` is deprecated, use `cc.loader.loadRes(url, cc.AudioClip)` instead please.
+     * @deprecated `cc.audioEngine.preload` is deprecated, use `cc.assetManager.loadRes(url, cc.AudioClip)` instead please.
      */
     preload: function (filePath, callback) {
         if (CC_DEBUG) {
-            cc.warn('`cc.audioEngine.preload` is deprecated, use `cc.loader.loadRes(url, cc.AudioClip)` instead please.');
+            cc.warn('`cc.audioEngine.preload` is deprecated, use `cc.assetManager.loadRes(url, cc.AudioClip)` instead please.');
         }
 
-        cc.loader.load(filePath, callback && function (error) {
+        cc.assetManager.loadRes(filePath, cc.AudioClip, null, callback && function (error) {
             if (!error) {
                 callback();
             }
@@ -588,7 +591,7 @@ var audioEngine = {
      * @param {Boolean} loop - Whether the music loop or not.
      * @return {Number} audioId
      * @example
-     * cc.loader.loadRes(url, cc.AudioClip, function (err, clip) {
+     * cc.assetManager.loadRes(url, cc.AudioClip, null, function (err, clip) {
      *     var audioID = cc.audioEngine.playMusic(clip, false);
      * });
      */
@@ -683,7 +686,7 @@ var audioEngine = {
      * @param {Boolean} loop - Whether the music loop or not.
      * @return {Number} audioId
      * @example
-     * cc.loader.loadRes(url, cc.AudioClip, function (err, clip) {
+     * cc.assetManager.loadRes(url, cc.AudioClip, null, function (err, clip) {
      *     var audioID = cc.audioEngine.playEffect(clip, false);
      * });
      */
